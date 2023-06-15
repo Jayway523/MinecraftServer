@@ -5,8 +5,6 @@ terraform {
       version = "~> 5.2"
     }
   }
-
-  required_version = ">= 1.2.0"
 }
 
 provider "aws" {
@@ -16,7 +14,7 @@ provider "aws" {
 
 variable "mojang_server_url" {
   type    = string
-  default = "https://launcher.mojang.com/v1/objects/c8f83c5655308435b3dcf03c06d9fe8740a77469/server.jar"
+  default = "https://piston-data.mojang.com/v1/objects/84194a2f286ef7c14ed7ce0090dba59902951553/server.jar"
 }
 resource "aws_security_group" "minecraft-server" {
   name        = "minecraft-server"
@@ -24,14 +22,20 @@ resource "aws_security_group" "minecraft-server" {
 
   ingress {
     description = "Default port for Minecraft"
-    from_port   = "25565"
-    to_port     = "25565"
+    from_port   = 25565
+    to_port     = 25565
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    from_port   = 22
+    to_port     = 22
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
   egress {
-    from_port   = "0"
-    to_port     = "0"
+    from_port   = 0
+    to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -39,18 +43,28 @@ resource "aws_security_group" "minecraft-server" {
     Name = "Minecraft Security Group"
   }
 }
+resource "tls_private_key" "minecraft_key" {
+  algorithm = "RSA"
+  rsa_bits  = 2048
+}
+
+resource "aws_key_pair" "minecraft_key" {
+  key_name   = "minecraft_key"
+  public_key = tls_private_key.minecraft_key.public_key_openssh
+
+}
 
 resource "aws_instance" "minecraft-server" {
-  ami                         = "ami-098e42ae54c764c35"
+  ami                         = "ami-03f65b8614a860c29"
   instance_type               = "t2.medium"
+  key_name                    = aws_key_pair.minecraft_key.key_name
   vpc_security_group_ids      = [aws_security_group.minecraft-server.id]
   associate_public_ip_address = true
   user_data                   = <<-EOF
     #!/bin/bash
-    sudo yum -y update
-    sudo rpm --import https://yum.corretto.aws/corretto.key
-    sudo curl -L -o /etc/yum.repos.d/corretto.repo https://yum.corretto.aws/corretto.repo
-    sudo yum install -y java-17-amazon-corretto-devel.x86_64
+    sudo apt update
+    sudo add-apt-repository ppa:openjdk-r/ppa 
+    sudo apt install openjdk-17-jre-headless
     wget -O server.jar ${var.mojang_server_url}
     java -Xmx1024M -Xms1024M -jar server.jar nogui
     sed -i 's/eula=false/eula/true' eula.txt
@@ -60,6 +74,7 @@ resource "aws_instance" "minecraft-server" {
     Name = "Minecraft"
   }
 }
+
 output "instance_ip_addr" {
   value = aws_instance.minecraft-server.public_ip
 }
